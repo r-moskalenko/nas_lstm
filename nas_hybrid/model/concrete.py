@@ -22,19 +22,25 @@ class Op:
         IDENTITY = 1
         # linear
         DENSE = 2
+        DENSE_GENERAL = 3  # compat with big_vision/models/vit
         CONV = 4
         ADD = 5
         SCALAR_ADD = 6
         MUL = 25
         SCALAR_MUL = 7
         DOT_GENERAL = 8
+        SELF_ATTENTION = 9  # compat with big_vision/models/vit
         EINSUM = 10
         # activation functions
         RELU = 11
+        GELU = 12
+        SWISH = 26
         SIGMOID = 28
         SOFTMAX = 13
         # normalization layers
         BATCH_NORM = 14
+        LAYER_NORM = 15
+        GROUP_NORM = 16
         # shape layers
         RESHAPE = 17
         FLATTEN = 18
