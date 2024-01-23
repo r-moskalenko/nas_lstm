@@ -37,6 +37,7 @@ class Op:
         SWISH = 26
         SIGMOID = 28
         SOFTMAX = 13
+        TANH = 29
         # normalization layers
         BATCH_NORM = 14
         LAYER_NORM = 15

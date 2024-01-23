@@ -368,7 +368,8 @@ class Model(nn.Module):
                 OpType.RELU: nn.relu,
                 OpType.GELU: nn.gelu,
                 OpType.SWISH: nn.swish,
-                OpType.SIGMOID: nn.sigmoid
+                OpType.SIGMOID: nn.sigmoid,
+                OpType.TANH: nn.tanh
             }[op_type]
             output_values = [fn(input_value)]
 
