@@ -259,3 +259,240 @@ def replace_subgraph(graph,
     return graph
 
 
+class SubgraphModel():
+    """A concrete subgraph.
+
+  A concrete subgraph consists of:
+  - The full graph, in which the subgraph is *already* embedded, i.e., you
+  should call replace_subgraph BEFORE creating a ConcreteSubgraph!
+  - An instantiation of the full graph, as specified by the state (i.e.,
+  parameters). If None, the subgraph is treated as abstract.
+  - An execution of the full graph, as specified by a set of inputs.
+  - A specification of the subgraph, as defined by the list of subgraph nodes.
+  If None, the subgraph is just the full graph.
+  """
+
+    def __init__(self,
+                 graph,
+                 constants,
+                 state,
+                 inputs,
+                 subgraph=None):
+        self.graph = graph
+        self.constants = constants
+        self.state = state
+        self.inputs = inputs
+        self.subgraph: SubgraphSpec = subgraph if subgraph else []
+
+        self.input_names = None
+        self.output_names = None
+        self.original_outputs = graph.output_names
+
+        if subgraph:
+            self._subgraph_to_names()
+
+            # graph for graph inputs -> subg inputs
+            self.subg_inputs_graph = copy.deepcopy(graph)
+            self.subg_inputs_graph.output_names = self.input_names
+            self.subg_inputs_model = Model(self.subg_inputs_graph, self.constants)
+            self.subg_inputs = None
+
+            # graph for graph inputs -> subg outputs
+            self.subg_outputs_graph = copy.deepcopy(graph)
+            self.subg_outputs_graph.output_names = self.output_names
+            self.subg_outputs_model = Model(self.subg_outputs_graph, self.constants)
+            self.subg_outputs = None
+
+            # graph for subg inputs -> subg outputs
+            subg_ops = [node.op for node in subgraph]
+            self.subg_graph = new_graph(self.input_names, self.output_names, subg_ops)
+            self.subg_model = Model(self.subg_graph, self.constants)
+        else:
+            self.input_names = [
+                canonicalize_tensor_name(name) for name in graph.input_names
+            ]
+            self.output_names = [
+                canonicalize_tensor_name(name) for name in graph.output_names
+            ]
+
+            # subg inputs = inputs to the graph
+            self.subg_inputs_graph = None
+            self.subg_inputs_model = None
+            self.subg_inputs = inputs
+
+            # graph for graph inputs -> subg outputs
+            self.subg_outputs_graph = copy.deepcopy(graph)
+            self.subg_outputs_model = Model(self.subg_outputs_graph, self.constants)
+            self.subg_outputs = None
+
+            # subg outputs = full graph outputs
+            self.subg_graph = self.subg_outputs_graph
+            self.subg_model = self.subg_outputs_model
+
+    def _subgraph_to_names(self):
+        """Populates the incoming and outgoing edges of the subgraph."""
+        assert self.subgraph
+
+        input_names = []
+        output_names = []
+        produced = []
+        for node in self.subgraph:
+            # check to see which inputs are incoming edges to the subgraph
+            for input_name in node.op.input_names:
+                if input_name not in produced and input_name not in input_names:
+                    input_names.append(input_name)
+
+            # keep track of produced tensors (internal edges in the subgraph)
+            for idx in range(node.op.num_outputs):
+                produced.append(f"{node.op.name}:{idx}")
+
+            # only the rewired outputs become externally visible to the graph
+            for idx, output_name in enumerate(node.output_names):
+                if output_name is not None:
+                    output_names.append(f"{node.op.name}:{idx}")
+
+        self.input_names = input_names
+        self.output_names = output_names
+
+    def get_subg_inputs(
+            self, graph_inputs,
+            intermediates=False,
+    ):
+        """Returns the inputs to the subgraph given inputs to the full graph.
+
+    Args:
+      graph_inputs: The dictionary of input values to the full graph.
+      intermediates: Whether to return all the inputs.
+
+    Returns:
+      The inputs to the subgraph.
+
+    Raises:
+      ValueError: If execution is necessary, but state is not provided.
+    """
+
+        # if no self.subg_inputs_model, then the subgraph is the full graph, so the
+        # input to the subgraph is the same as the input to the full graph
+        if not self.subg_inputs_model:
+            return graph_inputs
+
+        # execute the subg_inputs_model
+        if not self.state:
+            raise ValueError("Cannot execute subgraph without state.")
+        if intermediates:
+            old_output_names = self.subg_inputs_model.graph.output_names
+            self.subg_inputs_model.graph.output_names = []
+        subg_inputs = self.subg_inputs_model.apply(self.state, graph_inputs)
+        if intermediates:
+            self.subg_inputs_model.graph.output_names = old_output_names
+
+        return subg_inputs
+
+    def get_default_subg_inputs(self):
+        """Returns the default inputs to the subgraph."""
+        if self.subg_inputs is not None:
+            return self.subg_inputs
+        self.subg_inputs = self.get_subg_inputs(self.inputs)
+        return self.subg_inputs
+
+    def get_subg_outputs(
+            self, graph_inputs
+    ):
+        """Returns the output from the subgraph given inputs to the full graph.
+
+    Args:
+      graph_inputs: The dictionary of input values to the full graph. If None,
+        defaults to the stored input values.
+
+    Returns:
+      The outputs of the subgraph.
+
+    Raises:
+      ValueError: If execution is necessary, but state is not provided.
+    """
+        # execute the subg_outputs_model
+        if not self.state:
+            raise ValueError("Cannot execute subgraph without state.")
+        return self.subg_outputs_model.apply(self.state, graph_inputs)
+
+    def get_default_subg_outputs(self):
+        """Returns the default outputs of the subgraph."""
+        if self.subg_outputs is not None:
+            return self.subg_outputs
+        subg_inputs = self.get_default_subg_inputs()
+        self.subg_outputs = self.execute_subg(subg_inputs)
+        return self.subg_outputs
+
+    def execute_subg(
+            self, inputs
+    ):
+        """Returns the output from the subgraph given inputs to the subgraph.
+
+    Args:
+      inputs: The dictionary of input values to the subgraph.
+
+    Returns:
+      The outputs of the subgraph.
+
+    Raises:
+      ValueError: If state is not provided.
+    """
+        if not self.state:
+            raise ValueError("Cannot execute subgraph without state.")
+        return self.subg_model.apply(self.state, inputs)
+
+    def update_subg_outputs(self, output_names):
+        """Updates the outputs of the subgraph.
+
+    Args:
+      output_names: The list of new output_names.
+
+    Raises:
+      ValueError: If output_names are not produced in the subgraph.
+    """
+
+        for output_name in output_names:
+            found = False
+            for op in self.subg_graph.ops:
+                for idx in range(op.num_outputs):
+                    if output_name == f"{op.name}:{idx}":
+                        found = True
+                        break
+                if found: break
+            if not found:
+                raise ValueError(f"Requested output {output_name} not in subgraph.")
+
+        self.output_names = output_names
+        self.subg_graph.output_names = output_names
+        self.subg_model.graph.output_names = output_names
+        self.subg_outputs_graph.output_names = output_names
+        self.subg_outputs_model.graph.output_names = output_names
+
+
+def inherit_params(
+        new_params,
+        old_params):
+    """Implements parameter inheritance.
+
+  new_params inherits from old_params.
+  This only does the top level params, matched by name
+  e.g., layer0/conv is treated as a param, and not layer0/conv/kernel
+
+  Args:
+    new_params: the params doing the inheriting
+    old_params: the params to be inherited
+
+  Returns:
+    inherited_params: old_params that were inherited
+    trainable_params: new_params that were not inherited
+  """
+    inherited_params = {}
+    trainable_params = {}
+
+    for param in new_params.keys():
+        if param in old_params:
+            inherited_params[param] = old_params[param]
+        else:
+            trainable_params[param] = new_params[param]
+
+    return inherited_params, trainable_params
