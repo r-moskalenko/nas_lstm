@@ -247,23 +247,23 @@ class OpPairings:
             input_idx=None):
         """Returns the Pairing for an Op.
 
-    If output_idx and input_idx are both None, returns all the pairings.
-    Otherwise, returns the pairing between the corresponding output and input
-    tensors of the op.
+        If output_idx and input_idx are both None, returns all the pairings.
+        Otherwise, returns the pairing between the corresponding output and input
+        tensors of the op.
 
-    Args:
-      op: Op to get pairings for.
-      in_shapes: The shapes of the input tensors.
-      output_idx: the index of the output tensor to pair.
-      input_idx: the index of the input tensor to pair.
+        Args:
+          op: Op to get pairings for.
+          in_shapes: The shapes of the input tensors.
+          output_idx: the index of the output tensor to pair.
+          input_idx: the index of the input tensor to pair.
 
-    Returns:
-      The pairing.
+        Returns:
+          The pairing.
 
-    Raises:
-      ValueError: if the op is not recorded in op_pairings.
-      ValueError: if only one of output_idx or input_idx is specified.
-    """
+        Raises:
+          ValueError: if the op is not recorded in op_pairings.
+          ValueError: if only one of output_idx or input_idx is specified.
+        """
         key = self.hash(op, in_shapes)
         if key not in self.pairings:
             self._update_pairings(op, in_shapes)
